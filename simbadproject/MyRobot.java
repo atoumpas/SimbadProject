@@ -13,25 +13,24 @@ public class MyRobot extends Agent {
         Forward, Orientation, Follow, Stop
     }  
     private robotState state; 
-    private final ArrayList<Float> previous_center_observations;
+    private final ArrayList<Float> previous_observations;
     private final RangeSensorBelt sonars;  
     private final LightSensor light_center;
     private final LightSensor light_left;
     private final LightSensor light_right;
-    private float previous_left;
-    private float previous_right;
     
     private static final double SAFETY = 0.7;
     private static final double K1 = 5;
     private static final double K2 = 0.8;
     private static final double K3 = 1; 
     
-    private final double LIGHT_THRESHOLD = 0.16;
+    private final double LIGHT_THRESHOLD_CENTER = 0.10;
+    private final double LIGHT_THRESHOLD_SIDE = 0.04;
     private static final int LIGHT_FREQUENCE = 7;
     
     public MyRobot (Vector3d position, String name) {
         super(position,name);
-        previous_center_observations = new ArrayList<>();
+        previous_observations = new ArrayList<>();
         sonars = RobotFactory.addSonarBeltSensor(this, 12);
         light_center = RobotFactory.addLightSensor(this);
         light_left = RobotFactory.addLightSensorLeft(this);
@@ -47,13 +46,7 @@ public class MyRobot extends Agent {
     
     private void switchToState(robotState new_state) {
         state = new_state;
-        clearObservationValues();
-    }
-    
-    private void clearObservationValues() {
-        previous_center_observations.clear();
-        previous_left = -1;
-        previous_right = -1;
+        previous_observations.clear();
     }
     
     private void forward() {
@@ -61,7 +54,7 @@ public class MyRobot extends Agent {
        setTranslationalVelocity(1); 
        
        if (reachedSensorFrequency()) {
-            previous_center_observations.add(light_center.getAverageLuminance());
+            previous_observations.add(light_center.getAverageLuminance());
         }
        
        if (reachedGoal()) {
@@ -80,11 +73,9 @@ public class MyRobot extends Agent {
     }
     
     private boolean reachedGoal() {
-        //return light_center.getAverageLuminance() >= LIGHT_THRESHOLD;
-        Point3d robot_pos = new Point3d();
-        this.getCoords(robot_pos);
-        double distance = robot_pos.distance(new Point3d(5,0,5));
-        return distance <= 0.6;
+        return light_center.getAverageLuminance() >= LIGHT_THRESHOLD_CENTER &&
+               light_left.getAverageLuminance() <= LIGHT_THRESHOLD_SIDE &&
+               light_right.getAverageLuminance() <= LIGHT_THRESHOLD_SIDE;        
     }
     
     private boolean foundObstacle() {
@@ -98,40 +89,49 @@ public class MyRobot extends Agent {
     }
     
     private boolean foundLocalMaximum() {
-        int size = previous_center_observations.size();
+        int size = previous_observations.size();
         if (size < 3) {
             return false;
         }
         
-        float observation1 = previous_center_observations.get(size - 1);
-        float observation2 = previous_center_observations.get(size - 2);
-        float observation3 = previous_center_observations.get(size - 3);
+        double observation1 = previous_observations.get(size - 1);
+        double observation2 = previous_observations.get(size - 2);
+        double observation3 = previous_observations.get(size - 3);
         return observation1 < observation2 && observation2 > observation3;
     }
     
     private void orientation() {
         setTranslationalVelocity(0); 
-        setRotationalVelocity(1); 
-       
-        if(isAlignedWithLight()) {
+        double new_rotational_velocity;
+        if (lightIsLeft()) {
+            new_rotational_velocity = 0.5;
+        }
+        else {
+            new_rotational_velocity = -0.5;
+        }
+        
+        if (isSwitchingRotation(new_rotational_velocity)) {
+            // Make more sudden turn to better align with light in last clock hit, before switching state
+            new_rotational_velocity *= 10;
             switchToState(robotState.Forward);
         }
-       
-        if (reachedSensorFrequency()) {
-            previous_left = light_left.getAverageLuminance();
-            previous_right = light_right.getAverageLuminance();
-        }
+        
+        setRotationalVelocity(new_rotational_velocity);
     }
     
-    private boolean isAlignedWithLight() {
-        return light_left.getAverageLuminance() < previous_left && light_right.getAverageLuminance() > previous_right;
+    private boolean lightIsLeft() {
+        return light_left.getAverageLuminance() > light_right.getAverageLuminance();
+    }
+    
+    private boolean isSwitchingRotation(double new_velocity) {
+        return new_velocity == -this.getRotationalVelocity();
     }
     
     private void follow() {
         circumventObstacle();
         
         if (reachedSensorFrequency()) {
-            previous_center_observations.add(light_center.getAverageLuminance());
+            previous_observations.add(light_center.getAverageLuminance());
         }
         
         if (foundLocalMaximum()) {
@@ -165,7 +165,9 @@ public class MyRobot extends Agent {
     
     @Override
     public void performBehavior() {
-        System.out.println(state);
+        System.out.println("Current state: " + state);
+        System.out.println(light_center.getAverageLuminance());
+        System.out.println(light_left.getAverageLuminance());
         switch(state) {
             case Forward:
                 forward();
@@ -180,14 +182,5 @@ public class MyRobot extends Agent {
                 stop();
                 break;
         }
-        
-        //Point3d robot_pos = new Point3d();
-        //this.getCoords(robot_pos);
-        //double distance = robot_pos.distance(new Point3d(5,0,0));
-        //System.out.println("Distance from goal: " + distance);
-        
-        System.out.println("Center luminance is: " + light_center.getAverageLuminance());
-        //System.out.println("Left luminance is: " + light_left.getAverageLuminance());
-        //System.out.println("Right luminance is: " + light_right.getAverageLuminance());
     }
 }
